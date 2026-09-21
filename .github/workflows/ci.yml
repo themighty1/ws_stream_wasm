@@ -81,4 +81,35 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@v2
 
 
+  linux-atomics:
+
+    name: Linux Rust Nightly (atomics regression test)
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Install latest nightly Rust
+        uses: actions-rs/toolchain@v1
+        with:
+            toolchain  : nightly
+            override   : true
+            components : clippy, rust-src
+            target     : wasm32-unknown-unknown
+
+
+      - name: install wasm-pack
+        uses: jetli/wasm-pack-action@v0.3.0
+        with:
+          # Optional version of wasm-pack to install(eg. 'v0.9.1', 'latest')
+          version: 'latest'
+
+
+      - name: Checkout crate
+        uses: actions/checkout@v3
+
+
+      - name: Run atomics regression test
+        run : bash ci/test-atomics.bash
+
+
 

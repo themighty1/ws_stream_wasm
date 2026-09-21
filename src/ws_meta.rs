@@ -250,7 +250,7 @@ impl WsMeta
 				// onmessage on the same queue, so the early handler can now
 				// be released. Synchronous: no event can dispatch in between.
 				//
-				std::mem::drop( on_mesg_early );
+				drop( on_mesg_early );
 
 				stream
 			}

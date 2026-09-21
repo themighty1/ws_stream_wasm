@@ -163,7 +163,7 @@ async fn data_integrity_cbor()
 //
 async fn echo_cbor( data: Data )
 {
-	info!( "   Enter echo_cbor: {}", &data.hello );
+	info!( "   Enter echo_cbor: {}", data.hello );
 
 	let (_ws, wsio) = connect().await;
 
