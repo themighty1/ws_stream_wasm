@@ -58,6 +58,12 @@ pub struct WsStream
 impl WsStream
 {
 	/// Create a new WsStream.
+	///
+	/// `queue` is the message queue, normally pre-populated by the early
+	/// onmessage handler installed in `WsMeta::connect`, so messages that
+	/// arrived before the connection opened are not lost. This replaces the
+	/// handler with the steady-state one on the same queue; both steps are
+	/// synchronous, so no message event can dispatch in between.
 	//
 	pub(crate) fn new
 	(
@@ -66,6 +72,7 @@ impl WsStream
 		on_open : SendWrapper< Closure< dyn FnMut()               > > ,
 		on_error: SendWrapper< Closure< dyn FnMut()               > > ,
 		on_close: SendWrapper< Closure< dyn FnMut( JsCloseEvt   ) > > ,
+		queue   : SendWrapper< Rc< RefCell< VecDeque<WsMessage> > > > ,
 
 	) -> Self
 
@@ -73,7 +80,6 @@ impl WsStream
 		let waker     : SendWrapper< Rc<RefCell<Option<Waker>>> > = SendWrapper::new( Rc::new( RefCell::new( None )) );
 		let sink_waker: SendWrapper< Rc<RefCell<Option<Waker>>> > = SendWrapper::new( Rc::new( RefCell::new( None )) );
 
-		let queue = SendWrapper::new( Rc::new( RefCell::new( VecDeque::new() ) ) );
 		let q2    = queue.clone();
 		let w2    = waker.clone();
 		let ph2   = pharos.clone();

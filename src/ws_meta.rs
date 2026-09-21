@@ -1,4 +1,4 @@
-use crate::{ import::*, WsErr, WsState, WsStream, WsEvent, CloseEvent, notify };
+use crate::{ import::*, WsErr, WsMessage, WsState, WsStream, WsEvent, CloseEvent, notify };
 
 
 /// The meta data related to a websocket. Allows access to the methods on the WebSocket API.
@@ -96,9 +96,36 @@ impl WsMeta
 		let     ph2    = pharos.clone();
 		let     ph3    = pharos.clone();
 		let     ph4    = pharos.clone();
+		let     ph5    = pharos.clone();
 
 
-		// Setup our event listeners
+		// FIX (tlsn): attach onmessage synchronously here, before the first
+		// await below. Messages (eg. a server greeting) arriving between the
+		// handshake and WsStream construction would otherwise dispatch with
+		// no handler and be silently dropped by the browser. Early messages
+		// are buffered in this queue, which WsStream::new adopts.
+		//
+		let queue_early = Rc::new( RefCell::new( VecDeque::new() ) );
+		let q_early     = queue_early.clone();
+
+		#[ allow( trivial_casts ) ]
+		//
+		let on_mesg_early = Closure::wrap( Box::new( move |msg_evt: MessageEvent|
+		{
+			match WsMessage::try_from( msg_evt )
+			{
+			Ok (msg) => q_early.borrow_mut().push_back( msg ),
+
+				Err(err) => notify( ph5.clone(), WsEvent::WsErr( err ) ),
+			}
+
+		}) as Box< dyn FnMut( MessageEvent ) > );
+
+
+		// Setup our event listeners. NOTE: all handler registration below is
+		// synchronous with no await until WsStream construction, so (JS being
+		// single threaded) no message event can dispatch before every handler
+		// is installed.
 		//
 		#[ allow( trivial_casts ) ]
 		//
@@ -141,9 +168,16 @@ impl WsMeta
 		}) as Box< dyn FnMut( JsCloseEvt ) > );
 
 
-		ws.set_onopen ( Some( on_open .as_ref().unchecked_ref() ));
-		ws.set_onclose( Some( on_close.as_ref().unchecked_ref() ));
-		ws.set_onerror( Some( on_error.as_ref().unchecked_ref() ));
+		ws.set_onopen   ( Some( on_open .as_ref().unchecked_ref() ));
+		ws.set_onclose  ( Some( on_close.as_ref().unchecked_ref() ));
+		ws.set_onerror  ( Some( on_error.as_ref().unchecked_ref() ));
+		ws.set_onmessage( Some( on_mesg_early.as_ref().unchecked_ref() ));
+
+		// We don't handle Blob's. Set this synchronously up front (rather
+		// than after open) so early messages are already ArrayBuffers and
+		// don't fail conversion in the handler above.
+		//
+		ws.set_binary_type( BinaryType::Arraybuffer );
 
 		// In case of future task cancellation the current task may be interrupted at an await, therefore not reaching
 		// the `WsStream` construction, whose `Drop` glue would have been responsible for unregistering the callbacks.
@@ -161,6 +195,7 @@ impl WsMeta
 					self.ws.set_onopen(None);
 					self.ws.set_onclose(None);
 					self.ws.set_onerror(None);
+					self.ws.set_onmessage(None);
 					self.ws.close().unwrap_throw(); // cannot throw without code and reason.
 
 					log::warn!( "WsMeta::connect future was dropped while connecting to: {}.", self.ws.url() );
@@ -191,10 +226,6 @@ impl WsMeta
 		//
 		std::mem::forget(guard);
 
-		// We don't handle Blob's
-		//
-		ws.set_binary_type( BinaryType::Arraybuffer );
-
 
 		Ok
 		((
@@ -204,14 +235,25 @@ impl WsMeta
 				ws: ws.clone(),
 			},
 
-			WsStream::new
-			(
-				ws,
-				ph4,
-				SendWrapper::new( on_open  ),
-				SendWrapper::new( on_error ),
-				SendWrapper::new( on_close ),
-			)
+			{
+				let stream = WsStream::new
+				(
+					ws,
+					ph4,
+					SendWrapper::new( on_open  ),
+					SendWrapper::new( on_error ),
+					SendWrapper::new( on_close ),
+					SendWrapper::new( queue_early ),
+				);
+
+				// WsStream::new synchronously installed the steady-state
+				// onmessage on the same queue, so the early handler can now
+				// be released. Synchronous: no event can dispatch in between.
+				//
+				std::mem::drop( on_mesg_early );
+
+				stream
+			}
 		))
 	}
 
